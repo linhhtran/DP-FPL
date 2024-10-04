@@ -1,3 +1,3 @@
 #!/bin/bash
 
-python federated_main.py --dataset-config-file $1 --factorization $2 --rank $3 --noise $4 --seed $5
+python federated_main.py --root $1 --dataset-config-file $2 --num-users $3 --rank $4 --noise $5 --seed $6

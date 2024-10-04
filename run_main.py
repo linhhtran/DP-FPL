@@ -1,20 +1,20 @@
 import os
 
-def run(dataset, factorization, rank, noise, seed):
+def run(root, dataset, users, rank, noise, seed):
     dataset_yaml = f'configs/datasets/{dataset}.yaml'
-    os.system(f'srun_main.sh {dataset_yaml} {factorization} {rank} {noise} {seed}')
+    os.system(f'srun_main.sh {root} {dataset_yaml} {users} {rank} {noise} {seed}')
 
 # variables
-dataset_list = ['caltech101', 'oxford_pets', 'oxford_flowers', 'food101']
+seed_list = [1, 2, 3]
+dataset_list = ['caltech101', 'oxford_pets', 'oxford_flowers']
 rank_list = [1, 2, 4, 8]
 noise_list = [0.0, 0.1, 0.2, 0.4]
-seed_list = [1, 2, 3]
+
+root = 'DATA/' # change to your dataset path
+users = 10
 
 for seed in seed_list:
     for dataset in dataset_list:
-        for noise in noise_list:
-            run(dataset, 'full', 0, noise, seed)
-            for rank in rank_list:
-                run(dataset, 'fedpgp', rank, noise, seed)
-                run(dataset, 'lora', rank, noise, seed)
-                run(dataset, 'dpfpl', rank, noise, seed)
+        for rank in rank_list:
+            for noise in noise_list:
+                run(root, dataset, users, rank, noise, seed)

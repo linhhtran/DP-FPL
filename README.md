@@ -18,6 +18,8 @@ Follow the instructions [here](https://github.com/KaiyangZhou/CoOp/blob/main/DAT
 
 `--num-users`: number of clients in Federated Prompt Learning, default to 10.
 
+`--factorization`: factorization scheme, default to dpfpl. Choose from other baselines: full, fedpgp, lora.
+
 `--rank`: factorization rank, default to 8.
 
 `--noise`: differential privacy noise scale, default to 0.4.
@@ -27,8 +29,8 @@ Follow the instructions [here](https://github.com/KaiyangZhou/CoOp/blob/main/DAT
 You can run one instance of DP-FPL using the following command:
 
 ```
-python federated_main.py --root DATA/ --dataset-config-file configs/datasets/caltech101.yaml --num-users 10 --rank 8 --noise 0.2 --seed 1
+python federated_main.py --root DATA/ --dataset-config-file configs/datasets/caltech101.yaml --num-users 10 --factorization dpfpl --rank 8 --noise 0.2 --seed 1
 ```
 
-You can also run multiple instances with different parameters by running `python run_main.py`.
+You can also run multiple instances of DP-FPL with different parameters by running `python run_main.py`.
 

@@ -30,5 +30,5 @@ You can run one instance of DP-FPL using the following command:
 python federated_main.py --root DATA/ --dataset-config-file configs/datasets/caltech101.yaml --num-users 10 --rank 8 --noise 0.2 --seed 1
 ```
 
-You can also run multiple instances with different parameters using the script `python run_main.py`.
+You can also run multiple instances with different parameters by running `python run_main.py`.
 

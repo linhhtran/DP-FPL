@@ -1,21 +1,35 @@
 # Privacy-Preserving Personalized Federated Prompt Learning for Multimodal Large Language Models
 The implementation of paper Privacy-Preserving Personalized Federated Prompt Learning for Multimodal Large Language Models.
+The code is based on CoOp reqpository available at https://github.com/KaiyangZhou/CoOp/tree/main.
 
-## How to Run
+## Installation
+Follow the instruction described [here](https://github.com/KaiyangZhou/Dassl.pytorch#installation) to install and set up necessary packages and dependencies.
+Install additional packages required by CLIP by running `pip install -r requirements.txt`.
 
-You can run `federated_main.py` with some specified arguments.
+## Data preparation
+Follow the instructions [here](https://github.com/KaiyangZhou/CoOp/blob/main/DATASETS.md) to prepare the following datasets: Caltech101, OxfordPets, OxfordFlowers.
 
-## Data Preparation
-Please follow the instructions at CoOP https://github.com/KaiyangZhou/CoOp/blob/main/DATASETS.md to prepare the following datasets: Caltech101, OxfordPets, OxfordFlowers, Food101.
+## How to run
 
-### Training
+### Training parameters
 
-`--root` takes as input a path to dataset.
+`--root`: a path to all datasets.
 
-`--config-file` means which config file to use.
+`--dataset-config-file`: which dataset config file to use, default to "configs/datasets/caltech101.yaml".
 
-You can select variables like shots, users by changing `cfg` or you can change every arguments you like in scripts.
+`--num-users`: number of clients in Federated Prompt Learning, default to 10.
 
-### Running example
-`bash scripts/plt_few_shot.sh`
+`--rank`: factorization rank, default to 8.
+
+`--noise`: differential privacy noise scale, default to 0.4.
+
+### Example run
+
+You can run one instance of DP-FPL using the following command:
+
+```
+python federated_main.py --root DATA/ --dataset-config-file configs/datasets/caltech101.yaml --num-users 10 --rank 8 --noise 0.2 --seed 1
+```
+
+You can also run multiple instances with different parameters using the script `python run_main.py`.
 

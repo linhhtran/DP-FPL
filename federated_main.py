@@ -218,7 +218,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if torch.cuda.is_available():
         print('Number of gpu:', torch.cuda.device_count())
-        main(args)
     else:
-        print('No gpu')
-
+        print('Warning: no gpu')
+    main(args)

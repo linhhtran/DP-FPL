@@ -4,6 +4,7 @@ from Dassl.dassl.utils import set_random_seed
 from Dassl.dassl.config import get_cfg_default
 from Dassl.dassl.engine import build_trainer
 
+import os
 import math
 import copy
 import pickle
@@ -71,7 +72,7 @@ def setup_cfg(args):
 
 def save_checkpoint(args, epoch, local_trainers, local_acc, neighbor_acc, local_err, neighbor_err, local_f1, neighbor_f1):
     dataset = args.dataset_config_file.split('/')[-1].split('.')[0]
-    save_filename = f'/checkpoints/{dataset}/{args.factorization}_{args.rank}_{args.noise}_{args.seed}.pth.tar'
+    save_filename = os.path.join(os.getcwd(), f'checkpoints/{dataset}/{args.factorization}_{args.rank}_{args.noise}_{args.seed}.pth.tar')
     state = {
         "epoch": epoch + 1,
         "local_trainers": local_trainers,
@@ -86,7 +87,7 @@ def save_checkpoint(args, epoch, local_trainers, local_acc, neighbor_acc, local_
 
 def load_checkpoint(args):
     dataset = args.dataset_config_file.split('/')[-1].split('.')[0]
-    save_filename = f'/checkpoints/{dataset}/{args.factorization}_{args.rank}_{args.noise}_{args.seed}.pth.tar'
+    save_filename = os.path.join(os.getcwd(), f'/checkpoints/{dataset}/{args.factorization}_{args.rank}_{args.noise}_{args.seed}.pth.tar')
     checkpoint = torch.load(save_filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
     epoch = checkpoint["epoch"]
     local_trainers = checkpoint["local_trainers"]
@@ -106,6 +107,12 @@ def main(args):
 
     if torch.cuda.is_available() and cfg.USE_CUDA:
         torch.backends.cudnn.benchmark = True
+
+    dataset = args.dataset_config_file.split('/')[-1].split('.')[0]
+    directories = ['checkpoints', f'checkpoints/{dataset}', 'outputs', f'outputs/{dataset}']
+    for directory in directories:
+        if not os.path.exists(os.path.join(os.getcwd(), directory)):
+            os.makedirs(os.path.join(os.getcwd(), directory))
 
     global_gradients = [{} for i in range(args.num_users)]
     local_trainers = []
@@ -172,10 +179,11 @@ def main(args):
         print("------------local test finish-------------")
         print("Epoch on server :", epoch)
         # save checkpoint
-        save_checkpoint(args, epoch, local_trainers, local_acc_list, neighbor_acc_list, local_err_list, neighbor_err_list, local_f1_list, neighbor_f1_list)
+        # uncomment if want to save checkpoint, be aware of disk quota issue
+        # save_checkpoint(args, epoch, local_trainers, local_acc_list, neighbor_acc_list, local_err_list, neighbor_err_list, local_f1_list, neighbor_f1_list)
         dataset_name = args.dataset_config_file.split('/')[-1].split('.')[0]
         pickle.dump([local_acc_list, neighbor_acc_list, local_err_list, neighbor_err_list, local_f1_list, neighbor_f1_list],
-                    open(f'/outputs/{dataset_name}/acc_{args.factorization}_{args.rank}_{args.noise}_{args.seed}.pkl', 'wb'))
+                    open(os.path.join(os.getcwd(), f'outputs/{dataset_name}/acc_{args.factorization}_{args.rank}_{args.noise}_{args.seed}.pkl'), 'wb'))
 
     print("maximum test local acc:", max(local_acc_list))
     print("mean of local acc:",np.mean(local_acc_list[-5:]))
@@ -192,7 +200,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=1, help="only positive value enables a fixed seed")
 
     # parameters of factorization and differential privacy
-    parser.add_argument('--factorization', type=str, default='fedpgp', help='Choose from: full, fedpgp, lora, dpfpl')
+    parser.add_argument('--factorization', type=str, default='dpfpl', help='Choose from: full, fedpgp, lora, dpfpl')
     parser.add_argument('--rank', type=int, default=8, help='matrix factorization rank')
     parser.add_argument('--norm-thresh', type=float, default=10.0, help='clipping norm threshold')
     parser.add_argument('--noise', type=float, default=0.4, help='differential privacy noise scale')

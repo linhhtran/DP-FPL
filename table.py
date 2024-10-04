@@ -3,7 +3,7 @@ import pickle
 import os
 
 # Variables
-dataset_list = ['caltech101', 'oxford_pets', 'oxford_flowers', 'food101']
+dataset_list = ['caltech101', 'oxford_pets', 'oxford_flowers']
 factorization_list = ['full', 'fedpgp', 'lora', 'dpfpl']
 rank_list = [1, 2, 4, 8]
 noise_list = [0.0, 0.4, 0.2, 0.1]
@@ -15,11 +15,10 @@ def read_data(dataset, factorization, rank, noise):
         rank = 0
     all_seeds_local, all_seeds_base = [], []
     for seed in seed_list:
-        file_name = f'/outputs/{dataset}/acc_{factorization}_{rank}_{noise}_{seed}.pkl'
+        file_name = os.path.join(os.getcwd(), f'outputs/{dataset}/acc_{factorization}_{rank}_{noise}_{seed}.pkl')
         if os.path.isfile(file_name):
             local, base, _, _, _, _ = pickle.load(open(file_name, 'rb'))
             acc_len = min(rounds, len(local), len(base))
-#            local, base = local[:acc_len], base[:acc_len]
             local, base = local[acc_len-10:acc_len], base[acc_len-10:acc_len]
             all_seeds_local.append(sum(local) / len(local))
             all_seeds_base.append(sum(base) / len(base))

@@ -192,10 +192,10 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=1, help="only positive value enables a fixed seed")
 
     # parameters of factorization and differential privacy
-    parser.add_argument('--factorization', type=str, default='full', help='Choose from: full, fedpgp, lora, dpfpl')
-    parser.add_argument('--rank', type=int, default=0, help='matrix factorization rank')
+    parser.add_argument('--factorization', type=str, default='fedpgp', help='Choose from: full, fedpgp, lora, dpfpl')
+    parser.add_argument('--rank', type=int, default=8, help='matrix factorization rank')
     parser.add_argument('--norm-thresh', type=float, default=10.0, help='clipping norm threshold')
-    parser.add_argument('--noise', type=float, default=0.0, help='differential privacy noise scale')
+    parser.add_argument('--noise', type=float, default=0.4, help='differential privacy noise scale')
 
     # parameters of datasets
     # caltech101, oxford_flowers, oxford_pets, food101 and dtd

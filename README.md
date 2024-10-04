@@ -4,7 +4,6 @@ The code is based on CoOp reqpository available at https://github.com/KaiyangZho
 
 ## Installation
 Follow the instruction described [here](https://github.com/KaiyangZhou/Dassl.pytorch#installation) to install and set up necessary packages and dependencies.
-Install additional packages required by CLIP by running `pip install -r requirements.txt`.
 
 ## Data preparation
 Follow the instructions [here](https://github.com/KaiyangZhou/CoOp/blob/main/DATASETS.md) to prepare the following datasets: Caltech101, OxfordPets, OxfordFlowers.

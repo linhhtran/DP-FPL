@@ -322,8 +322,6 @@ class DP_FPL(TrainerX):
         param_dict['prompt_learner.global_ctx'].grad = avg_global_gradient
         # update
         self.model_update()
-        if (self.batch_idx + 1) == self.num_batches:
-            self.update_lr()
 
     def parse_batch_train(self, batch):
         input = batch["img"]

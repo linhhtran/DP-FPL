@@ -9,7 +9,7 @@ from tqdm import tqdm
 from Dassl.dassl.data import DataManager
 from Dassl.dassl.optim import build_optimizer, build_lr_scheduler
 from Dassl.dassl.utils import (
-    MetricMeter, tolist_if_not, count_num_param, load_checkpoint,
+    tolist_if_not, count_num_param, load_checkpoint,
     save_checkpoint, load_pretrained_weights
 )
 from Dassl.dassl.modeling import build_head, build_backbone
@@ -135,17 +135,23 @@ class TrainerBase:
         if not torch.isfinite(loss).all():
             raise FloatingPointError("Loss is infinite or NaN!")
 
-    def train(self, idx=-1):
-        self.run_epoch(idx)
+    def create_data_iter(self, idx=-1):
+        self.set_model_mode("train")
+        loader = self.fed_train_loader_x_dict[idx]
+        self.train_iter = iter(loader)
+        self.num_batches = len(loader)
+
+    def delete_data_iter(self):
+        self.train_iter = None
+
+    def train_forward(self, idx=-1):
+        self.set_model_mode("train")
+        batch = next(self.train_iter)
+        loss_summary = self.forward_pass(batch)
+        print('Loss summary:', loss_summary)
 
     def train_backward(self, avg_global_gradient=None):
-        self.run_epoch_backward(avg_global_gradient)
-
-    def run_epoch(self):
-        raise NotImplementedError
-
-    def run_epoch_backward(self):
-        raise NotImplementedError
+        self.backward_pass(avg_global_gradient)
 
     def test(self):
         raise NotImplementedError
@@ -245,8 +251,14 @@ class SimpleTrainer(TrainerBase):
         if device_count > 1:
             print(f"Detected {device_count} GPUs (use nn.DataParallel)")
 
-    def train(self,idx=-1):
-        super().train(idx)
+    def create_data_iter(self,idx=-1):
+        super().create_data_iter(idx)
+
+    def delete_data_iter(self):
+        super().delete_data_iter()
+
+    def train_forward(self,idx=-1):
+        super().train_forward(idx)
 
     def train_backward(self, avg_global_gradient=None):
         super().train_backward(avg_global_gradient)
@@ -294,19 +306,6 @@ class SimpleTrainer(TrainerBase):
 
 class TrainerX(SimpleTrainer):
     """A base trainer using labeled data only."""
-
-    def run_epoch(self, idx=-1):
-        self.set_model_mode("train")
-        losses = MetricMeter()
-        loader = self.fed_train_loader_x_dict[idx]
-        self.num_batches = len(loader)
-
-        for self.batch_idx, batch in enumerate(loader):
-            loss_summary = self.forward_pass(batch)
-            losses.update(loss_summary)
-
-    def run_epoch_backward(self, avg_global_gradient):
-        self.backward_pass(avg_global_gradient)
 
     def parse_batch_train(self, batch):
         input = batch["img"]

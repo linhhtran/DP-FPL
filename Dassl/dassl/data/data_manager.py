@@ -79,6 +79,11 @@ class DataManager:
             tfm_test = custom_tfm_test
 
         # Build federated fed_train_loader_x
+        min_datasize = len(dataset.federated_train_x[0])
+        for idx in range(cfg.DATASET.USERS):
+            min_datasize = min(min_datasize, len(dataset.federated_train_x[idx]))
+        for idx in range(cfg.DATASET.USERS):
+            dataset.federated_train_x[idx] = dataset.federated_train_x[idx][:min_datasize]
         fed_train_loader_x_dict = defaultdict()
         if dataset.federated_train_x:
             for idx in range(cfg.DATASET.USERS):

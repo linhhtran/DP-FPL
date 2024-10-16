@@ -138,46 +138,63 @@ def main(args):
         idxs_users = list(range(0,cfg.DATASET.USERS))
         print("------------local train start epoch:", epoch, "-------------")
 
+        # create data iter
         for idx in idxs_users:
-            local_trainers[idx].train(idx=idx)
-            global_gradients[idx] = local_trainers[idx].model.prompt_learner.global_ctx.grad.data
+            local_trainers[idx].create_data_iter(idx=idx)
+        max_batch = local_trainers[0].num_batches
 
-        print("------------local train finish epoch:", epoch, "-------------")
+        # loop through batches
+        for batch in range(0, max_batch):
+            # train
+            for idx in idxs_users:
+                local_trainers[idx].train_forward(idx=idx)
+                global_gradients[idx] = local_trainers[idx].model.prompt_learner.global_ctx.grad.data
 
-        # average gradient
-        avg_global_gradient = sum(global_gradients) / cfg.DATASET.USERS
-        if args.noise > 0:
-            noise = torch.normal(0, std, size=avg_global_gradient.shape, device=avg_global_gradient.device)
-            avg_global_gradient += noise
+            print("------------local train finish epoch:", epoch, "-------------")
 
-        # backward and update
+            # average gradient
+            avg_global_gradient = sum(global_gradients) / cfg.DATASET.USERS
+            if args.noise > 0:
+                noise = torch.normal(0, std, size=avg_global_gradient.shape, device=avg_global_gradient.device)
+                avg_global_gradient += noise
+
+            # backward and update
+            for idx in idxs_users:
+                local_trainers[idx].train_backward(avg_global_gradient=avg_global_gradient)
+
+            # test
+            print("------------local test start-------------")
+            results_local, results_neighbor = [], []
+            for idx in idxs_users:
+                results_local.append(local_trainers[idx].test(idx=idx, split='local'))
+                results_neighbor.append(local_trainers[idx].test(idx=idx, split='neighbor'))
+
+            local_acc, neighbor_acc, local_err, neighbor_err, local_f1, neighbor_f1 = [], [], [], [], [], []
+            for k in range(len(results_local)):
+                local_acc.append(results_local[k][0])
+                neighbor_acc.append(results_neighbor[k][0])
+                local_err.append(results_local[k][1])
+                neighbor_err.append(results_neighbor[k][1])
+                local_f1.append(results_local[k][2])
+                neighbor_f1.append(results_neighbor[k][2])
+            local_acc_list.append(sum(local_acc)/len(local_acc))
+            neighbor_acc_list.append(sum(neighbor_acc)/len(neighbor_acc))
+            local_err_list.append(sum(local_err)/len(local_err))
+            neighbor_err_list.append(sum(neighbor_err)/len(neighbor_err))
+            local_f1_list.append(sum(local_f1)/len(local_f1))
+            neighbor_f1_list.append(sum(neighbor_f1)/len(neighbor_f1))
+            print(f"Global test local acc:", sum(local_acc)/len(local_acc))
+            print(f"Global test neighbor acc:", sum(neighbor_acc)/len(neighbor_acc))
+            print("------------local test finish-------------")
+            print(f"Epoch: {epoch}/{max_epoch}\tfinished batch : {batch}/{max_batch}")
+
+        # delete data iter
         for idx in idxs_users:
-            local_trainers[idx].train_backward(avg_global_gradient=avg_global_gradient)
+            local_trainers[idx].delete_data_iter()
 
-        print("------------local test start-------------")
-        results_local, results_neighbor = [], []
-        for idx in list(range(0,cfg.DATASET.USERS)):
-            results_local.append(local_trainers[idx].test(idx=idx, split='local'))
-            results_neighbor.append(local_trainers[idx].test(idx=idx, split='neighbor'))
-
-        local_acc, neighbor_acc, local_err, neighbor_err, local_f1, neighbor_f1 = [], [], [], [], [], []
-        for k in range(len(results_local)):
-            local_acc.append(results_local[k][0])
-            neighbor_acc.append(results_neighbor[k][0])
-            local_err.append(results_local[k][1])
-            neighbor_err.append(results_neighbor[k][1])
-            local_f1.append(results_local[k][2])
-            neighbor_f1.append(results_neighbor[k][2])
-        local_acc_list.append(sum(local_acc)/len(local_acc))
-        neighbor_acc_list.append(sum(neighbor_acc)/len(neighbor_acc))
-        local_err_list.append(sum(local_err)/len(local_err))
-        neighbor_err_list.append(sum(neighbor_err)/len(neighbor_err))
-        local_f1_list.append(sum(local_f1)/len(local_f1))
-        neighbor_f1_list.append(sum(neighbor_f1)/len(neighbor_f1))
-        print(f"Global test local acc:", sum(local_acc)/len(local_acc))
-        print(f"Global test neighbor acc:", sum(neighbor_acc)/len(neighbor_acc))
-        print("------------local test finish-------------")
-        print("Epoch on server :", epoch)
+        # update learning rate
+        for idx in idxs_users:
+            local_trainers[idx].update_lr()
         # save checkpoint
         # uncomment if want to save checkpoint, be aware of disk quota issue
         # save_checkpoint(args, epoch, local_trainers, local_acc_list, neighbor_acc_list, local_err_list, neighbor_err_list, local_f1_list, neighbor_f1_list)

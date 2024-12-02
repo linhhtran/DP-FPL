@@ -80,8 +80,15 @@ class DataManager:
 
         # Build federated fed_train_loader_x
         min_datasize = len(dataset.federated_train_x[0])
+        max_datasize = len(dataset.federated_train_x[0])
+        max_idx = 0
         for idx in range(cfg.DATASET.USERS):
             min_datasize = min(min_datasize, len(dataset.federated_train_x[idx]))
+            if len(dataset.federated_train_x[idx]) > max_datasize:
+                max_datasize = len(dataset.federated_train_x[idx])
+                max_idx = idx
+        mia_in = dataset.federated_train_x[max_idx][min_datasize:]
+        mia_out = dataset.federated_test_x[max_idx]
         for idx in range(cfg.DATASET.USERS):
             dataset.federated_train_x[idx] = dataset.federated_train_x[idx][:min_datasize]
         fed_train_loader_x_dict = defaultdict()
@@ -145,7 +152,10 @@ class DataManager:
         self.classnames = dataset.classnames
 
         # Dataset and data-loaders
+        self.max_idx = max_idx
         self.dataset = dataset
+        self.mia_in = mia_in
+        self.mia_out = mia_out
         self.fed_train_loader_x_dict = fed_train_loader_x_dict
         self.fed_test_loader_x_dict = fed_test_loader_x_dict
         self.fed_test_neighbor_loader_x_dict = fed_test_neighbor_loader_x_dict

@@ -207,7 +207,9 @@ class SimpleTrainer(TrainerBase):
         """
         dm = DataManager(self.cfg)
 
-        self.mia_train_loader_x = dm.mia_train_loader_x
+        self.max_idx = dm.max_idx
+        self.mia_in = dm.mia_in
+        self.mia_out = dm.mia_out
         self.fed_train_loader_x_dict = dm.fed_train_loader_x_dict
         self.fed_test_local_loader_x_dict = dm.fed_test_loader_x_dict
         self.fed_test_neighbor_loader_x_dict = dm.fed_test_neighbor_loader_x_dict

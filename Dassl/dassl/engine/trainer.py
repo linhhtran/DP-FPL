@@ -135,18 +135,9 @@ class TrainerBase:
         if not torch.isfinite(loss).all():
             raise FloatingPointError("Loss is infinite or NaN!")
 
-    def create_data_iter(self, idx=-1):
+    def train_forward(self, idx=-1, train_iter=None):
         self.set_model_mode("train")
-        loader = self.fed_train_loader_x_dict[idx]
-        self.train_iter = iter(loader)
-        self.num_batches = len(loader)
-
-    def delete_data_iter(self):
-        self.train_iter = None
-
-    def train_forward(self, idx=-1):
-        self.set_model_mode("train")
-        batch = next(self.train_iter)
+        batch = next(train_iter)
         loss_summary = self.forward_pass(batch)
         print('Loss summary:', loss_summary)
 
@@ -216,6 +207,7 @@ class SimpleTrainer(TrainerBase):
         """
         dm = DataManager(self.cfg)
 
+        self.mia_train_loader_x = dm.mia_train_loader_x
         self.fed_train_loader_x_dict = dm.fed_train_loader_x_dict
         self.fed_test_local_loader_x_dict = dm.fed_test_loader_x_dict
         self.fed_test_neighbor_loader_x_dict = dm.fed_test_neighbor_loader_x_dict
@@ -251,14 +243,8 @@ class SimpleTrainer(TrainerBase):
         if device_count > 1:
             print(f"Detected {device_count} GPUs (use nn.DataParallel)")
 
-    def create_data_iter(self,idx=-1):
-        super().create_data_iter(idx)
-
-    def delete_data_iter(self):
-        super().delete_data_iter()
-
-    def train_forward(self,idx=-1):
-        super().train_forward(idx)
+    def train_forward(self, idx=-1, train_iter=None):
+        super().train_forward(idx, train_iter)
 
     def train_backward(self, avg_global_gradient=None):
         super().train_backward(avg_global_gradient)
@@ -317,5 +303,3 @@ class TrainerX(SimpleTrainer):
         domain = domain.to(self.device)
 
         return input, label, domain
-
-

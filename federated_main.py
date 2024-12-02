@@ -70,34 +70,28 @@ def setup_cfg(args):
 
     return cfg
 
-def save_checkpoint(args, epoch, local_trainers, local_acc, neighbor_acc, local_err, neighbor_err, local_f1, neighbor_f1):
+def save_checkpoint(args, epoch, local_weights, local_acc, neighbor_acc):
     dataset = args.dataset_config_file.split('/')[-1].split('.')[0]
     save_filename = os.path.join(os.getcwd(), f'checkpoints/{dataset}/{args.factorization}_{args.rank}_{args.noise}_{args.seed}.pth.tar')
     state = {
         "epoch": epoch + 1,
-        "local_trainers": local_trainers,
+        "local_weights": local_weights,
         "local_acc": local_acc,
         "neighbor_acc": neighbor_acc,
-        "local_err": local_err,
-        "neighbor_err": neighbor_err,
-        "local_f1": local_f1,
-        "neighbor_f1": neighbor_f1,
     }
     torch.save(state, save_filename)
 
 def load_checkpoint(args):
     dataset = args.dataset_config_file.split('/')[-1].split('.')[0]
     save_filename = os.path.join(os.getcwd(), f'/checkpoints/{dataset}/{args.factorization}_{args.rank}_{args.noise}_{args.seed}.pth.tar')
+    if not os.path.exists(save_filename):
+        return 0, [{} for i in range(args.num_users)], [], []
     checkpoint = torch.load(save_filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
     epoch = checkpoint["epoch"]
-    local_trainers = checkpoint["local_trainers"]
+    local_weights = checkpoint["local_weights"]
     local_acc = checkpoint["local_acc"]
     neighbor_acc = checkpoint["neighbor_acc"]
-    local_err = checkpoint["local_err"]
-    neighbor_err = checkpoint["neighbor_err"]
-    local_f1 = checkpoint["local_f1"]
-    neighbor_f1 = checkpoint["neighbor_f1"]
-    return epoch, local_trainers, local_acc, neighbor_acc, local_err, neighbor_err, local_f1, neighbor_f1
+    return epoch, local_weights, local_acc, neighbor_acc
 
 
 def main(args):
@@ -108,49 +102,62 @@ def main(args):
     if torch.cuda.is_available() and cfg.USE_CUDA:
         torch.backends.cudnn.benchmark = True
 
-    dataset = args.dataset_config_file.split('/')[-1].split('.')[0]
-    directories = ['checkpoints', f'checkpoints/{dataset}', 'outputs', f'outputs/{dataset}']
-    for directory in directories:
-        if not os.path.exists(os.path.join(os.getcwd(), directory)):
-            os.makedirs(os.path.join(os.getcwd(), directory))
+    dirichlet = False
+    if args.dataset_config_file.split('/')[-1].split('.')[0] in ['cifar10', 'cifar100']:
+        dirichlet = True
 
     global_gradients = [{} for i in range(args.num_users)]
-    local_trainers = []
-    initial_trainer = build_trainer(cfg)
-    initial_weights = copy.deepcopy(initial_trainer.model.state_dict())
-    for i in range(args.num_users):
-        local_trainer = build_trainer(cfg)
-        local_trainer.model.load_state_dict(initial_weights, strict=False)
-        local_trainers.append(local_trainer)
+    local_weights = [{} for i in range(args.num_users)]
+    local_weights_g = [[] for i in range(args.num_users)]
+    local_weights_l = [[] for i in range(args.num_users)]
+    local_weights_u = [[] for i in range(args.num_users)]
+    local_weights_v = [[] for i in range(args.num_users)]
+
+    local_trainer = build_trainer(cfg)
+    initial_weights = copy.deepcopy(local_trainer.model.state_dict())
 
     # Training
     start_epoch = 0
     max_epoch = cfg.OPTIM.ROUND
-    local_acc_list, neighbor_acc_list, local_err_list, neighbor_err_list, local_f1_list, neighbor_f1_list = [], [], [], [], [], []
+    local_acc_list, neighbor_acc_list, = [], []
     if args.resume == 'True':
-        start_epoch, local_trainers, local_acc_list, neighbor_acc_list, local_err_list, neighbor_err_list, local_f1_list, neighbor_f1_list = load_checkpoint(args)
+        start_epoch, local_weights, local_acc_list, neighbor_acc_list = load_checkpoint(args)
         print('Resume from epoch', start_epoch)
     if start_epoch == max_epoch - 1:
         return
     if args.noise > 0:
-        std = local_trainers[0].std / cfg.DATASET.USERS
+        std = local_trainer.std / cfg.DATASET.USERS
     for epoch in range(start_epoch, max_epoch): # global communication loop
         idxs_users = list(range(0,cfg.DATASET.USERS))
         print("------------local train start epoch:", epoch, "-------------")
 
-        # create data iter
+        # create data iters
+        data_iters = []
         for idx in idxs_users:
-            local_trainers[idx].create_data_iter(idx=idx)
-        max_batch = local_trainers[0].num_batches
+            local_trainer.set_model_mode("train")
+            loader = local_trainer.fed_train_loader_x_dict[idx]
+            data_iters.append(iter(loader))
+        max_batch = len(loader)
 
         # loop through batches
         for batch in range(0, max_batch):
-            # train
+            local_trainer.set_model_mode("train")
             for idx in idxs_users:
-                local_trainers[idx].train_forward(idx=idx)
-                global_gradients[idx] = local_trainers[idx].model.prompt_learner.global_ctx.grad.data
+                if epoch == 0:
+                    local_trainer.model.load_state_dict(initial_weights, strict=False)
+                else:
+                    local_trainer.model.load_state_dict(local_weights[idx], strict=False)
+                # train
+                local_trainer.train_forward(idx=idx, train_iter=data_iters[idx])
 
-            print("------------local train finish epoch:", epoch, "-------------")
+                local_weight = local_trainer.model.state_dict()
+                global_gradients[idx] = local_trainer.model.prompt_learner.global_ctx.grad.data
+                local_weights_g[idx] = copy.deepcopy(local_weight['prompt_learner.global_ctx'])
+                if args.factorization in ['fedotp', 'dplora', 'dpfpl']:
+                    local_weights_l[idx] = copy.deepcopy(local_weight['prompt_learner.local_ctx'])
+                if args.factorization in ['fedpgp', 'dplora', 'dpfpl']:
+                    local_weights_u[idx] = copy.deepcopy(local_weight['prompt_learner.local_u_ctx'])
+                    local_weights_v[idx] = copy.deepcopy(local_weight['prompt_learner.local_v_ctx'])
 
             # average gradient
             avg_global_gradient = sum(global_gradients) / cfg.DATASET.USERS
@@ -160,73 +167,87 @@ def main(args):
 
             # backward and update
             for idx in idxs_users:
-                local_trainers[idx].train_backward(avg_global_gradient=avg_global_gradient)
+                local_weights[idx]['prompt_learner.global_ctx'] = local_weights_g[idx]
+                if args.factorization in ['fedotp', 'dplora', 'dpfpl']:
+                    local_weights[idx]['prompt_learner.local_ctx'] = local_weights_l[idx]
+                if args.factorization in ['fedpgp', 'dplora', 'dpfpl']:
+                    local_weights[idx]['prompt_learner.local_u_ctx'] = local_weights_u[idx]
+                    local_weights[idx]['prompt_learner.local_v_ctx'] = local_weights_v[idx]
 
-            # test
-            print("------------local test start-------------")
-            results_local, results_neighbor = [], []
-            for idx in idxs_users:
-                results_local.append(local_trainers[idx].test(idx=idx, split='local'))
-                results_neighbor.append(local_trainers[idx].test(idx=idx, split='neighbor'))
+                local_trainer.model.load_state_dict(local_weights[idx], strict=False)
+                local_trainer.train_backward(avg_global_gradient=avg_global_gradient)
 
-            local_acc, neighbor_acc, local_err, neighbor_err, local_f1, neighbor_f1 = [], [], [], [], [], []
-            for k in range(len(results_local)):
-                local_acc.append(results_local[k][0])
+                local_weight = local_trainer.model.state_dict()
+                local_weights_g[idx] = copy.deepcopy(local_weight['prompt_learner.global_ctx'])
+                if args.factorization in ['fedotp', 'dplora', 'dpfpl']:
+                    local_weights_l[idx] = copy.deepcopy(local_weight['prompt_learner.local_ctx'])
+                if args.factorization in ['fedpgp', 'dplora', 'dpfpl']:
+                    local_weights_u[idx] = copy.deepcopy(local_weight['prompt_learner.local_u_ctx'])
+                    local_weights_v[idx] = copy.deepcopy(local_weight['prompt_learner.local_v_ctx'])
+
+        # test
+        print("------------local test start-------------")
+        local_trainer.set_model_mode("eval")
+        results_local, results_neighbor = [], []
+        for idx in idxs_users:
+            local_weights[idx]['prompt_learner.global_ctx'] = local_weights_g[idx]
+            if args.factorization in ['fedotp', 'dplora', 'dpfpl']:
+                local_weights[idx]['prompt_learner.local_ctx'] = local_weights_l[idx]
+            if args.factorization in ['fedpgp', 'dplora', 'dpfpl']:
+                local_weights[idx]['prompt_learner.local_u_ctx'] = local_weights_u[idx]
+                local_weights[idx]['prompt_learner.local_v_ctx'] = local_weights_v[idx]
+
+            local_trainer.model.load_state_dict(local_weights[idx], strict=False)
+
+            results_local.append(local_trainer.test(idx=idx, split='local'))
+            if not dirichlet:
+                results_neighbor.append(local_trainer.test(idx=idx, split='neighbor'))
+
+        local_acc, neighbor_acc = [], []
+        for k in range(len(results_local)):
+            local_acc.append(results_local[k][0])
+            if not dirichlet:
                 neighbor_acc.append(results_neighbor[k][0])
-                local_err.append(results_local[k][1])
-                neighbor_err.append(results_neighbor[k][1])
-                local_f1.append(results_local[k][2])
-                neighbor_f1.append(results_neighbor[k][2])
-            local_acc_list.append(sum(local_acc)/len(local_acc))
+        local_acc_list.append(sum(local_acc)/len(local_acc))
+        print(f"Global test local acc:", sum(local_acc)/len(local_acc))
+        if not dirichlet:
             neighbor_acc_list.append(sum(neighbor_acc)/len(neighbor_acc))
-            local_err_list.append(sum(local_err)/len(local_err))
-            neighbor_err_list.append(sum(neighbor_err)/len(neighbor_err))
-            local_f1_list.append(sum(local_f1)/len(local_f1))
-            neighbor_f1_list.append(sum(neighbor_f1)/len(neighbor_f1))
-            print(f"Global test local acc:", sum(local_acc)/len(local_acc))
             print(f"Global test neighbor acc:", sum(neighbor_acc)/len(neighbor_acc))
-            print("------------local test finish-------------")
-            print(f"Epoch: {epoch}/{max_epoch}\tfinished batch : {batch}/{max_batch}")
+        print("------------local test finish-------------")
+        print(f"Epoch: {epoch}/{max_epoch}\tfinished batch : {batch}/{max_batch}")
 
-        # delete data iter
-        for idx in idxs_users:
-            local_trainers[idx].delete_data_iter()
-
-        # update learning rate
-        for idx in idxs_users:
-            local_trainers[idx].update_lr()
         # save checkpoint
-        # uncomment if want to save checkpoint, be aware of disk quota issue
-        # save_checkpoint(args, epoch, local_trainers, local_acc_list, neighbor_acc_list, local_err_list, neighbor_err_list, local_f1_list, neighbor_f1_list)
+        save_checkpoint(args, epoch, local_weights, local_acc_list, neighbor_acc_list)
         dataset_name = args.dataset_config_file.split('/')[-1].split('.')[0]
-        pickle.dump([local_acc_list, neighbor_acc_list, local_err_list, neighbor_err_list, local_f1_list, neighbor_f1_list],
+        pickle.dump([local_acc_list, neighbor_acc_list],
                     open(os.path.join(os.getcwd(), f'outputs/{dataset_name}/acc_{args.factorization}_{args.rank}_{args.noise}_{args.seed}.pkl'), 'wb'))
 
     print("maximum test local acc:", max(local_acc_list))
     print("mean of local acc:",np.mean(local_acc_list[-5:]))
-    print("maximum test neighbor acc:", max(neighbor_acc_list))
-    print("mean of neighbor acc:",np.mean(neighbor_acc_list[-5:]))
+    if not dirichlet:
+        print("maximum test neighbor acc:", max(neighbor_acc_list))
+        print("mean of neighbor acc:",np.mean(neighbor_acc_list[-5:]))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--round', type=int, default=100, help="number of communication round")
     parser.add_argument('--num-users', type=int, default=10, help="number of users")
-    parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
     parser.add_argument('--train-batch-size', type=int, default=32, help="number of trainer batch size")
     parser.add_argument('--test-batch-size', type=int, default=100, help="number of test batch size")
     parser.add_argument("--seed", type=int, default=1, help="only positive value enables a fixed seed")
 
     # parameters of factorization and differential privacy
-    parser.add_argument('--factorization', type=str, default='dpfpl', help='Choose from: full, fedpgp, lora, dpfpl')
+    parser.add_argument('--factorization', type=str, default='dpfpl', help='Choose from: promptfl, fedotp, fedpgp, dplora, dpfpl')
     parser.add_argument('--rank', type=int, default=8, help='matrix factorization rank')
     parser.add_argument('--norm-thresh', type=float, default=10.0, help='clipping norm threshold')
-    parser.add_argument('--noise', type=float, default=0.4, help='differential privacy noise scale')
+    parser.add_argument('--noise', type=float, default=0.0, help='differential privacy noise scale')
 
     # parameters of datasets
     # caltech101, oxford_flowers, oxford_pets, food101 and dtd
     parser.add_argument('--iid', default=False, help="is iid, control the iid of caltech101, oxford_flowers, oxford_pets, food101 and dtd")
     parser.add_argument('--num-shots', type=int, default=16, help="number of shots in few shot setting")
-    parser.add_argument('--useall', default=False, help="is useall, True for all training samples, False for few shot learning")
+    parser.add_argument('--useall', default=True, help="is useall, True for all training samples, False for few shot learning")
     # cifar10, cifar100
     parser.add_argument('--partition', type=str, default='noniid-labeldir', help='the data partitioning strategy of cifar10 and cifar100, select from "homo, noniid-labeluni, noniid-labeldir,noniid-labeldir100"')
     parser.add_argument('--beta', type=float, default=0.3, help='The parameter for the dirichlet distribution for data partitioning')
@@ -237,12 +258,9 @@ if __name__ == "__main__":
     # parameters of path
     parser.add_argument("--root", type=str, default="/datasets", help="path to dataset")
     parser.add_argument("--config-file", type=str, default="configs/trainers/DP-FPL/vit_b16.yaml", help="path to config file")
-    parser.add_argument("--dataset-config-file", type=str, default="configs/datasets/caltech101.yaml", help="path to config file for dataset setup")
-    parser.add_argument("--resume", type=str, default=None, help="resume training or not")
+    parser.add_argument("--dataset-config-file", type=str, default="configs/datasets/cifar100.yaml", help="path to config file for dataset setup")
+    parser.add_argument("--resume", type=str, default="False", help="resume training or not")
 
     args = parser.parse_args()
-    if torch.cuda.is_available():
-        print('Number of gpu:', torch.cuda.device_count())
-    else:
-        print('Warning: no gpu')
     main(args)
+

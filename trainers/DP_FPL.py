@@ -121,11 +121,11 @@ class PromptLearner(nn.Module):
         self.global_ctx = nn.Parameter(global_ctx_vectors)
 
         # local u and v context vectors
-        if self.factorization != 'fedpgp':
+        if self.factorization in ['fedotp', 'dplora', 'dpfpl']:
             local_ctx_vectors = torch.empty(n_ctx, ctx_dim, dtype=dtype) # n_ctx = 16, ctx_dim = 512
             nn.init.normal_(local_ctx_vectors, std=0.02)
             self.local_ctx = nn.Parameter(local_ctx_vectors)
-        if self.factorization != 'full':
+        if self.factorization in ['fedpgp', 'dplora', 'dpfpl']:
             local_u_ctx_vectors = torch.empty(n_ctx, self.rank, dtype=dtype)
             nn.init.normal_(local_u_ctx_vectors, std=0.02)
             self.local_u_ctx = nn.Parameter(local_u_ctx_vectors)
@@ -150,13 +150,15 @@ class PromptLearner(nn.Module):
         self.register_buffer("token_suffix", embedding[:, 1 + n_ctx :, :])  # CLS, EOS
         self.register_buffer("embedding", embedding)
 
-        self.n_cls = n_cls # 100 classes
+        self.n_cls = n_cls # number of classes
         self.n_ctx = n_ctx # number of text encoder of text prompts = 16
-        self.tokenized_prompts = tokenized_prompts # [100, 77] = [n_cls, clip prompt token limit]
+        self.tokenized_prompts = tokenized_prompts # [n_cls, clip prompt token limit]
         self.name_lens = name_lens
 
     def forward(self):
-        if self.factorization == 'full':
+        if self.factorization == 'promptfl':
+            client_ctx = self.global_ctx
+        elif self.factorization == 'fedotp':
             client_ctx = self.global_ctx + self.local_ctx
         elif self.factorization == 'fedpgp':
             client_ctx = self.global_ctx + torch.matmul(self.local_u_ctx, self.local_v_ctx)
@@ -164,10 +166,10 @@ class PromptLearner(nn.Module):
             local_u_ctx, local_v_ctx, residual = factorize_ctx(self.local_ctx.data, self.rank)
             self.local_u_ctx.data = local_u_ctx
             self.local_v_ctx.data = local_v_ctx
-            if self.factorization == 'dpfpl':
-                client_ctx = self.global_ctx + torch.matmul(self.local_u_ctx, self.local_v_ctx) + residual
-            elif self.factorization == 'lora':
+            if self.factorization == 'dplora':
                 client_ctx = self.global_ctx + torch.matmul(self.local_u_ctx, self.local_v_ctx)
+            elif self.factorization == 'dpfpl':
+                client_ctx = self.global_ctx + torch.matmul(self.local_u_ctx, self.local_v_ctx) + residual
 
         if client_ctx.dim() == 2:
             client_ctx = client_ctx.unsqueeze(0).expand(self.n_cls, -1, -1)
@@ -277,7 +279,10 @@ class DP_FPL(TrainerX):
                 scale = self.cfg.NORM_THRESH / norm
                 scale[scale>1] = 1
                 param_dict['prompt_learner.global_ctx'].grad *= scale
-            if self.cfg.FACTORIZATION == 'full':
+            if self.cfg.FACTORIZATION == 'promptfl':
+                noise = torch.normal(0, self.std, size=grad.shape, device=grad.device)
+                param_dict['prompt_learner.global_ctx'].grad += noise
+            elif self.cfg.FACTORIZATION == 'fedotp':
                 grad = param_dict['prompt_learner.local_ctx'].grad.data
                 norm = grad.norm(2)
                 if norm > self.cfg.NORM_THRESH:
@@ -286,7 +291,7 @@ class DP_FPL(TrainerX):
                     param_dict['prompt_learner.local_ctx'].grad *= scale
                 noise = torch.normal(0, self.std, size=grad.shape, device=grad.device)
                 param_dict['prompt_learner.local_ctx'].grad += noise
-            else:
+            elif self.cfg.FACTORIZATION in ['fedpgp', 'dplora', 'dpfpl']:
                 grad = param_dict['prompt_learner.local_u_ctx'].grad.data
                 norm = grad.norm(2)
                 if norm > self.cfg.NORM_THRESH:
@@ -304,7 +309,7 @@ class DP_FPL(TrainerX):
                 noise = torch.normal(0, self.std, size=grad.shape, device=grad.device)
                 param_dict['prompt_learner.local_v_ctx'].grad += noise
 
-        if self.cfg.FACTORIZATION == 'lora' or self.cfg.FACTORIZATION == 'dpfpl':
+        if self.cfg.FACTORIZATION in ['dplora', 'dpfpl']:
             full_grad = compute_full_grad(param_dict['prompt_learner.local_u_ctx'], param_dict['prompt_learner.local_v_ctx'], self.dtype)
             full_grad = full_grad.type(self.dtype)
             param_dict['prompt_learner.local_ctx'].grad = full_grad
